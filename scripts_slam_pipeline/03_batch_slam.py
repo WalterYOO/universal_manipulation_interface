@@ -13,6 +13,7 @@ os.chdir(ROOT_DIR)
 import pathlib
 import click
 import subprocess
+import shutil
 import multiprocessing
 import concurrent.futures
 from tqdm import tqdm
@@ -44,7 +45,9 @@ def runner(cmd, cwd, stdout_path, stderr_path, timeout, **kwargs):
 @click.option('-ml', '--max_lost_frames', type=int, default=60)
 @click.option('-tm', '--timeout_multiple', type=float, default=16, help='timeout_multiple * duration = timeout')
 @click.option('-np', '--no_docker_pull', is_flag=True, default=False, help="pull docker image from docker hub")
-def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeout_multiple, no_docker_pull):
+@click.option('-st', '--setting', default='/ORB_SLAM3/Examples/Monocular-Inertial/gopro10_maxlens_fisheye_setting_v1_720.yaml', help='ORB_SLAM3 camera setting yaml (host path or path inside image)')
+@click.option('-mi', '--mask_img', default=None, help='Custom mask png; overrides the built-in predefined mask')
+def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeout_multiple, no_docker_pull, setting, mask_img):
     input_dir = pathlib.Path(os.path.expanduser(input_dir)).absolute()
     input_video_dirs = [x.parent for x in input_dir.glob('demo*/raw_video.mp4')]
     input_video_dirs += [x.parent for x in input_dir.glob('map*/raw_video.mp4')]
@@ -96,13 +99,22 @@ def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeou
                     duration_sec = float(video.duration * video.time_base)
                 timeout = duration_sec * timeout_multiple
                 
-                slam_mask = np.zeros((2028, 2704), dtype=np.uint8)
-                slam_mask = draw_predefined_mask(
-                    slam_mask, color=255, mirror=True, gripper=False, finger=True)
-                cv2.imwrite(str(mask_write_path.absolute()), slam_mask)
+                if mask_img is not None:
+                    shutil.copyfile(os.path.expanduser(mask_img), str(mask_write_path.absolute()))
+                else:
+                    slam_mask = np.zeros((2028, 2704), dtype=np.uint8)
+                    slam_mask = draw_predefined_mask(
+                        slam_mask, color=255, mirror=True, gripper=False, finger=True)
+                    cv2.imwrite(str(mask_write_path.absolute()), slam_mask)
 
                 map_mount_source = map_path
                 map_mount_target = pathlib.Path('/map').joinpath(map_mount_source.name)
+                if pathlib.Path(setting).is_file():
+                    setting_mount_args = ['--volume', str(pathlib.Path(setting).absolute()) + ':/tmp/slam_setting.yaml:ro']
+                    setting_arg = '/tmp/slam_setting.yaml'
+                else:
+                    setting_mount_args = []
+                    setting_arg = setting
 
                 # run SLAM
                 cmd = [
@@ -111,10 +123,11 @@ def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeou
                     '--rm', # delete after finish
                     '--volume', str(video_dir) + ':' + '/data',
                     '--volume', str(map_mount_source.parent) + ':' + str(map_mount_target.parent),
+                    *setting_mount_args,
                     docker_image,
                     '/ORB_SLAM3/Examples/Monocular-Inertial/gopro_slam',
                     '--vocabulary', '/ORB_SLAM3/Vocabulary/ORBvoc.txt',
-                    '--setting', '/ORB_SLAM3/Examples/Monocular-Inertial/gopro10_maxlens_fisheye_setting_v1_720.yaml',
+                    '--setting', setting_arg,
                     '--input_video', str(video_path),
                     '--input_imu_json', str(json_path),
                     '--output_trajectory_csv', str(csv_path),

@@ -85,10 +85,12 @@ def get_x_projection(tx_tag_this, tx_tag_other):
 @click.option('-to', '--tcp_offset', type=float, default=0.205, help="Distance from gripper tip to mounting screw")
 @click.option('-ts', '--tx_slam_tag', default=None, help="tx_slam_tag.json")
 @click.option('-nz', '--nominal_z', type=float, default=0.072, help="nominal Z value for gripper finger tag")
+@click.option('-cch', '--cam_to_center_height', type=float, default=0.086, help='y offset from camera optical axis to TCP grip center; UMI default 0.086, measure for PocketGo')
+@click.option('-cti', '--cam_to_tip_offset', type=float, default=None, help='z distance from optical center to TCP tip; overrides cam_to_mount_offset + tcp_offset')
 @click.option('-ml', '--min_episode_length', type=int, default=24)
 @click.option('--ignore_cameras', type=str, default=None, help="comma separated string of camera serials to ignore")
 def main(input, output, tcp_offset, tx_slam_tag,
-         nominal_z, min_episode_length, ignore_cameras):
+         nominal_z, min_episode_length, ignore_cameras, cam_to_center_height, cam_to_tip_offset):
     # %% stage 0
     # gather inputs
     input_path = pathlib.Path(os.path.expanduser(input)).absolute()
@@ -99,10 +101,10 @@ def main(input, output, tcp_offset, tx_slam_tag,
     # tcp to camera transform
     # all unit in meters
     # y axis in camera frame
-    cam_to_center_height = 0.086 # constant for UMI
     # optical center to mounting screw, positive is when optical center is in front of the mount
     cam_to_mount_offset = 0.01465 # constant for GoPro Hero 9,10,11
-    cam_to_tip_offset = cam_to_mount_offset + tcp_offset
+    if cam_to_tip_offset is None:
+        cam_to_tip_offset = cam_to_mount_offset + tcp_offset
 
     pose_cam_tcp = np.array([0, cam_to_center_height, cam_to_tip_offset, 0,0,0])
     tx_cam_tcp = pose_to_mat(pose_cam_tcp)

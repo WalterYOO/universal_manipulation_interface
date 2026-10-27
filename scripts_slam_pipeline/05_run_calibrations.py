@@ -16,8 +16,9 @@ import subprocess
 
 # %%
 @click.command()
+@click.option('-nz', '--nominal_z', type=float, default=0.072, help='nominal Z value for gripper finger tag (UMI 0.072, PocketGo ~0.069)')
 @click.argument('session_dir', nargs=-1)
-def main(session_dir):
+def main(session_dir, nominal_z):
     script_dir = pathlib.Path(__file__).parent.parent.joinpath('scripts')
     
     for session in session_dir:
@@ -57,7 +58,8 @@ def main(session_dir):
             cmd = [
                 'python', str(script_path),
                 '--input', str(tag_path),
-                '--output', str(gripper_range_path)
+                '--output', str(gripper_range_path),
+                '--nominal_z', str(nominal_z)
             ]
             subprocess.run(cmd)
 

@@ -14,6 +14,7 @@ os.chdir(ROOT_DIR)
 import pathlib
 import click
 import subprocess
+import shutil
 import multiprocessing
 import concurrent.futures
 from tqdm import tqdm
@@ -27,8 +28,11 @@ from umi.common.cv_util import draw_predefined_mask
 @click.option('-m', '--map_path', default=None, help='ORB_SLAM3 *.osa map atlas file')
 @click.option('-d', '--docker_image', default="chicheng/orb_slam3:latest")
 @click.option('-np', '--no_docker_pull', is_flag=True, default=False, help="pull docker image from docker hub")
+@click.option('-st', '--setting', default='/ORB_SLAM3/Examples/Monocular-Inertial/gopro10_maxlens_fisheye_setting_v1_720.yaml', help='ORB_SLAM3 camera setting yaml (host path or path inside image)')
+@click.option('-mi', '--mask_img', default=None, help='Custom mask png; overrides the built-in predefined mask')
 @click.option('-nm', '--no_mask', is_flag=True, default=False, help="Whether to mask out gripper and mirrors. Set if map is created with bare GoPro no on gripper.")
-def main(input_dir, map_path, docker_image, no_docker_pull, no_mask):
+@click.option('-it', '--init_tag_id', type=int, default=None, help='ArUco tag id for tag-based SLAM init; -1 disables tag init')
+def main(input_dir, map_path, docker_image, no_docker_pull, no_mask, setting, mask_img, init_tag_id):
     video_dir = pathlib.Path(os.path.expanduser(input_dir)).absolute()
     for fn in ['raw_video.mp4', 'imu_data.json']:
         assert video_dir.joinpath(fn).is_file()
@@ -57,7 +61,10 @@ def main(input_dir, map_path, docker_image, no_docker_pull, no_mask):
     video_path = mount_target.joinpath('raw_video.mp4')
     json_path = mount_target.joinpath('imu_data.json')
     mask_path = mount_target.joinpath('slam_mask.png')
-    if not no_mask:
+    if mask_img is not None:
+        mask_write_path = video_dir.joinpath('slam_mask.png')
+        shutil.copyfile(os.path.expanduser(mask_img), str(mask_write_path.absolute()))
+    elif not no_mask:
         mask_write_path = video_dir.joinpath('slam_mask.png')
         slam_mask = np.zeros((2028, 2704), dtype=np.uint8)
         slam_mask = draw_predefined_mask(
@@ -66,6 +73,12 @@ def main(input_dir, map_path, docker_image, no_docker_pull, no_mask):
 
     map_mount_source = pathlib.Path(map_path)
     map_mount_target = pathlib.Path('/map').joinpath(map_mount_source.name)
+    if pathlib.Path(setting).is_file():
+        setting_mount_args = ['--volume', str(pathlib.Path(setting).absolute()) + ':/tmp/slam_setting.yaml:ro']
+        setting_arg = '/tmp/slam_setting.yaml'
+    else:
+        setting_mount_args = []
+        setting_arg = setting
 
     # run SLAM
     cmd = [
@@ -74,15 +87,20 @@ def main(input_dir, map_path, docker_image, no_docker_pull, no_mask):
         '--rm', # delete after finish
         '--volume', str(video_dir) + ':' + '/data',
         '--volume', str(map_mount_source.parent) + ':' + str(map_mount_target.parent),
+        *setting_mount_args,
         docker_image,
         '/ORB_SLAM3/Examples/Monocular-Inertial/gopro_slam',
         '--vocabulary', '/ORB_SLAM3/Vocabulary/ORBvoc.txt',
-        '--setting', '/ORB_SLAM3/Examples/Monocular-Inertial/gopro10_maxlens_fisheye_setting_v1_720.yaml',
+        '--setting', setting_arg,
         '--input_video', str(video_path),
         '--input_imu_json', str(json_path),
         '--output_trajectory_csv', str(csv_path),
         '--save_map', str(map_mount_target)
     ]
+    if init_tag_id is not None:
+        cmd.extend([
+            '--init_tag_id', str(init_tag_id)
+        ])
     if not no_mask:
         cmd.extend([
             '--mask_img', str(mask_path)
